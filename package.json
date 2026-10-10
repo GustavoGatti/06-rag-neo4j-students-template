@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "node --env-file .env src/index.ts",
-    "dev": "node --watch --inspect --env-file .env src/index.ts",
+    "dev": "node --watch --inspect=127.0.0.1:0 --env-file .env src/index.ts",
     "test": "node --env-file .env --test tests/**/*.test.ts",
     "seed": "node --env-file .env --watch data/seed.ts",
     "test:dev": "node --inspect --env-file .env --test --watch tests/**/*.test.ts",
@@ -30,6 +30,7 @@
   "dependencies": {
     "@langchain/community": "^1.1.17",
     "@langchain/core": "^1.1.27",
+    "@langchain/langgraph": "^1.4.19",
     "@langchain/openai": "^1.2.9",
     "fastify": "^5.7.4",
     "langchain": "^1.2.25",
