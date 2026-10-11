@@ -28,7 +28,7 @@ export function createQueryPlannerNode(llmClient: OpenRouterService) {
         console.log(`📝 Query requires decomposition into ${data.subQuestions.length} sub-questions:${subQuestionsFormmatted}`);
 
         return {
-          isMultiStep: false,
+          isMultiStep: true,
           subQuestions: data.subQuestions,
           currentStep: 0,
           subQueries:[],
