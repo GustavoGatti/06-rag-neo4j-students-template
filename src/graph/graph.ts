@@ -9,6 +9,7 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { z } from 'zod/v3';
 import type { BaseMessage } from '@langchain/core/messages';
 
+import { config } from '../config.ts';
 import { Neo4jService } from '../services/neo4jService.ts';
 import { OpenRouterService } from '../services/openrouterService.ts';
 
@@ -80,7 +81,9 @@ export function buildSalesGraph(
     .addEdge('cypherGenerator', 'cypherExecutor')
 
     .addConditionalEdges('cypherExecutor', (state: GraphState) => {
-      if (state.needsCorrection && (!state.correctionAttempts || state.correctionAttempts < 1)) {
+      const attempts = state.correctionAttempts ?? 0;
+
+      if (state.needsCorrection && attempts < config.maxCorrectionAttempts) {
         return 'cypherCorrection';
       }
 
