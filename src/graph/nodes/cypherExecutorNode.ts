@@ -19,7 +19,7 @@ async function executeCypherQuery(neo4jService: Neo4jService, query: string) {
         error: 'No results returned'
       }
     }
-    console.log('Results retrieved successfully:', results);
+    console.log('Results retrieved successfully:');
     return {
       results,
       error: null

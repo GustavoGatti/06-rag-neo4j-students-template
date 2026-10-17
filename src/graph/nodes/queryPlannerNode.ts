@@ -16,7 +16,7 @@ export function createQueryPlannerNode(llmClient: OpenRouterService) {
         console.error('❌ Error analyzing query:', error);
         return {
           ...state,
-          isMultiStep: true,
+          isMultiStep: false,
         };
       }
 
