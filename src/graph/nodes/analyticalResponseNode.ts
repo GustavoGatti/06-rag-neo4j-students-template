@@ -1,89 +1,139 @@
 import { AIMessage } from 'langchain';
 import { OpenRouterService } from '../../services/openrouterService.ts';
 import type { GraphState } from '../graph.ts';
+import { AnalyticalResponseSchema, getErrorResponsePrompt, getMultiStepSynthesisPrompt, getNoResultsPrompt, getSystemPrompt, getUserPromptTemplate } from '../../prompts/v1/analyticalResponse.ts';
 
-function formatResultsForAnswer(results: any[] | undefined) {
-  if (!results?.length) {
-    return 'No results found for this query.';
+
+async function handleErrorResponse(state: GraphState, llmClient: OpenRouterService): Promise<Partial<GraphState>> {
+  const systemPrompt = getSystemPrompt()
+  const userUserPrompt = getErrorResponsePrompt(state.error!, state.question)
+  const { data, error } = await llmClient.generateStructured(
+    systemPrompt,
+    userUserPrompt,
+    AnalyticalResponseSchema,
+  )
+
+  if (error) {
+    return {
+      messages: [new AIMessage(`An error ocurred: ${error}`)],
+      error,
+      answer: `An error ocurred: ${error}`,
+      followUpQuestions: [],
+    }
   }
 
-  const firstRow = results[0];
-  const keys = Object.keys(firstRow ?? {});
-
-  if (!keys.length) {
-    return 'Query returned data successfully.';
+  return {
+    messages: [new AIMessage(data?.answer!)],
+    answer: data?.answer,
+    followUpQuestions: data?.followUpQuestions,
   }
 
-  const sampleValues = results
-    .slice(0, 5)
-    .map((row) => {
-      const values = Object.values(row ?? {})
-        .filter((value) => value !== null && value !== undefined)
-        .map((value) => String(value));
+}
+async function handleSuccessResponse(state: GraphState, llmClient: OpenRouterService): Promise<Partial<GraphState>> {
+  const systemPrompt = getSystemPrompt()
+  let _userPrompt: string
+  if (
+    Boolean(
+      state.isMultiStep &&
+      state.subResults?.length &&
+      state.subQuestions?.length &&
+      state.subQueries?.length
+    )
+  ) {
+    console.log(`📊 Synthesizing ${state.subResults!.length} step results...`);
+    const stepsData = state.subResults!.map((results, index) => ({
+      stepNumber: index + 1,
+      question: state.subQuestions![index],
+      query: state.subQueries![index],
+      results: JSON.stringify(results)
+    }))
 
-      return values.length ? values.join(' | ') : '—';
-    })
-    .join('; ');
+    _userPrompt = getMultiStepSynthesisPrompt(state.question!, stepsData)
+  } else {
+    _userPrompt = getUserPromptTemplate(
+      state.question!,
+      state.query!,
+      JSON.stringify(state.dbResults)
+    )
+  }
 
-  return `I found ${results.length} result(s). Details: ${sampleValues}`;
+  const { data, error } = await llmClient.generateStructured(
+    systemPrompt,
+    _userPrompt,
+    AnalyticalResponseSchema,
+  )
+
+  if (error) {
+    console.error('Failed to generate analytical response');
+    return {
+      error: `Reponse generation faild: ${error ?? 'Unknown error'}`
+    }
+  }
+
+  console.log('✅ Generated analytical response');
+  return {
+    messages: [new AIMessage(data?.answer!)],
+    answer: data?.answer,
+    followUpQuestions: data?.followUpQuestions,
+  }
 }
 
-function buildFollowUpQuestions(question?: string) {
-  const base = [
-    'Would you like a breakdown by course?',
-    'Would you like to compare this against other periods?',
-    'Would you like more details by student or payment method?',
-  ];
+async function handleNoResultsResponse(
+  state: GraphState,
+  llmClient: OpenRouterService,
+): Promise<GraphState> {
+  console.log('💬 Generating no-results response...');
 
-  if (!question) return base.slice(0, 2);
+  const systemPrompt = getSystemPrompt();
+  const userPrompt = getNoResultsPrompt(
+    state.question ?? 'your query',
+    state.query ?? 'N/A'
+  );
 
-  const normalized = question.toLowerCase();
+  const { data, error } = await llmClient.generateStructured(
+    userPrompt,
+    systemPrompt,
+    AnalyticalResponseSchema,
+  );
 
-  if (normalized.includes('course')) {
-    return [
-      'Which course has the highest revenue?',
-      'How do course sales compare by month?',
-    ];
+  if (data) {
+    return {
+      ...state,
+      messages: [...state.messages, new AIMessage(data.answer)],
+      answer: data.answer,
+      followUpQuestions: data.followUpQuestions,
+    };
   }
 
-  if (normalized.includes('student')) {
-    return [
-      'Which students are most engaged?',
-      'Show me the students with the lowest progress.',
-    ];
-  }
-
-  if (normalized.includes('payment')) {
-    return [
-      'Which payment method is most used?',
-      'What is the revenue split by payment type?',
-    ];
-  }
-
-  return base;
+  const noResultsMessage = "No data found matching your query.";
+  return {
+    ...state,
+    messages: [...state.messages, new AIMessage(noResultsMessage)],
+    error,
+    answer: noResultsMessage,
+    followUpQuestions: [],
+  };
 }
 
 export function createAnalyticalResponseNode(llmClient: OpenRouterService) {
   return async (state: GraphState): Promise<Partial<GraphState>> => {
     try {
-      const question = state.question ?? state.originalQuery ?? 'sales analysis';
-      const baseAnswer = formatResultsForAnswer(state.dbResults ?? state.subResults?.flat() ?? undefined);
 
-      const answer = `${baseAnswer} This response is based on the query: "${question}".`;
+      if (state.error) {
+        return await handleErrorResponse(state, llmClient)
+      }
 
-      return {
-        ...state,
-        answer,
-        followUpQuestions: buildFollowUpQuestions(question),
-        messages: [new AIMessage(answer)],
-      };
+      if (!state.dbResults?.length) {
+        return await handleNoResultsResponse(state, llmClient);
+      }
+
+      return await handleSuccessResponse(state, llmClient)
+
     } catch (error: any) {
       console.error('Error generating analytical response:', error.message);
       return {
         ...state,
         error: `Response generation failed: ${error.message}`,
-        answer: 'No answer generated',
-        followUpQuestions: [],
       };
     }
   };
